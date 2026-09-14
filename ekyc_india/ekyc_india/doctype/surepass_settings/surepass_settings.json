@@ -67,7 +67,7 @@
   },
   {
    "depends_on": "enable_sandbox",
-   "description": "For example https://sandboxapp.surepass.app/sandbox/api/v1",
+   "description": "For example https://sandbox.surepass.app/api/v1",
    "fieldname": "sandbox_url",
    "fieldtype": "Data",
    "label": "Sandbox URL",

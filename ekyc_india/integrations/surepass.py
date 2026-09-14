@@ -18,6 +18,8 @@ Adding the next bureau Surepass carries is a class:
 and one line in hooks. Nothing else moves: not the report, not the log, not the rules.
 """
 
+import re
+
 import frappe
 from frappe import _
 from frappe.utils import cint
@@ -81,7 +83,7 @@ class SurepassBureauAdapter(BureauAdapter):
 		return {
 			"name": context.get("name"),
 			"pan": context.get("pan"),
-			"mobile": context.get("mobile"),
+			"mobile": indian_mobile(context.get("mobile")),
 			"gender": (context.get("gender") or "").lower(),
 			"consent": "Y",
 		}
@@ -114,3 +116,21 @@ class SurepassCibilAdapter(SurepassBureauAdapter):
 	key = "Surepass CIBIL"
 	bureau = "CIBIL"
 	endpoint = "/credit-report-cibil/fetch-report-pdf"
+
+
+def indian_mobile(value: str | None) -> str:
+	"""Ten bare digits, which is what Surepass ask for.
+
+	A lead's number is a Phone field, so it arrives carrying the country code and whatever
+	punctuation somebody typed: "+91-9988776655". Surepass's own examples are ten digits, and
+	a number they cannot match is a refusal we are billed for.
+	"""
+	digits = re.sub(r"\D", "", value or "")
+
+	if len(digits) == 12 and digits.startswith("91"):
+		return digits[2:]
+
+	if len(digits) == 11 and digits.startswith("0"):
+		return digits[1:]
+
+	return digits

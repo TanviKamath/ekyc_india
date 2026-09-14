@@ -101,6 +101,14 @@ class TestSurepassBureau(IntegrationTestCase):
 		self.assertEqual(body["gender"], "male")
 		self.assertEqual(body["pan"], TEST_PAN)
 
+	def test_a_number_is_sent_as_ten_bare_digits(self):
+		# A lead's Phone field keeps the country code and whatever punctuation was typed, and
+		# Surepass match on ten digits.
+		for typed in ("+91-9988776655", "+91 99887 76655", "09988776655", "9988776655"):
+			body = self.adapter.request_body({"mobile": typed})
+
+			self.assertEqual(body["mobile"], "9988776655", f"failed for {typed}")
+
 	def test_it_authenticates_with_a_bearer_token(self):
 		# Surepass issues one token and no client id, so this is not the base class's Basic auth.
 		self.assertEqual(self.adapter.auth_headers()["Authorization"], f"Bearer {TOKEN}")
