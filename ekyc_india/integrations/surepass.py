@@ -8,24 +8,13 @@ lending is not an Indian app. Lending owns the idea of a credit bureau; this own
 vendor. Reached only through the lending_integration_adapters hook, so nothing here is
 imported on a site without lending.
 
-Adding the next bureau Surepass carries is a class:
+Three bureaux are wired: CIBIL, Experian and CRIF. They share this token, this envelope and
+this parsing, and differ only in what they want asked. CIBIL takes a name and a gender,
+Experian a name and no gender, CRIF a first and last name and no gender at all. So a new one
+is its endpoint, its bureau name, and its request body — and nothing underneath.
 
-    class SurepassExperianAdapter(SurepassBureauAdapter):
-	key = "Surepass Experian"
-	bureau = "Experian"
-	endpoint = "/credit-report-experian/fetch-report-pdf"
-
-	def request_body(self, context: dict) -> dict:
-		# CIBIL's body without the gender, which Experian do not ask for.
-		return {**super().request_body(context), "name": context.get("name")}
-
-
-class SurepassCrifAdapter(SurepassBureauAdapter):
-        key = "Surepass CRIF"
-        bureau = "CRIF"
-        endpoint = "/credit-report-crif/fetch-report-pdf"
-
-and one line in hooks. Nothing else moves: not the report, not the log, not the rules.
+Surepass also sell a credit-report-v2 endpoint. It is deliberately not here: its response
+never says which bureau answered, and every Credit Bureau Report has to record one.
 """
 
 import re
