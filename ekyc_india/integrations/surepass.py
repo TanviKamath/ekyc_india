@@ -32,10 +32,12 @@ SETTINGS = "Surepass Settings"
 # alone never says whether a call worked.
 SUCCESS_CODE = 200
 
-# The signed link Surepass returns carries an AWS key and signature in its query string, and
-# expires in ten minutes. We download the PDF during the call and drop the URL, rather than
-# writing somebody else's credentials into our own logs.
-DROPPED_FROM_PAYLOAD = ("credit_report_link", "credit_report_base64")
+# Never kept in the stored report. The signed link carries an AWS key and signature in its
+# query string and expires in ten minutes, so we download the PDF during the call and drop
+# the URL rather than writing somebody else's credentials into our own records. CRIF answers
+# with an aadhaar_number field, which is the last thing a credit file needs to be carrying
+# around: the score is what the rules read, and the number is not ours to keep.
+DROPPED_FROM_PAYLOAD = ("credit_report_link", "credit_report_base64", "aadhaar_number")
 
 # CIBIL answers below the scoring floor to say why it could not score, rather than to score
 # badly: -1 is no history at all, 1 to 5 too little of it. Treating those as a score would
@@ -46,8 +48,10 @@ LOWEST_REAL_SCORE = 300
 class SurepassBureauAdapter(BureauAdapter):
 	"""What every bureau Surepass carries has in common.
 
-	They share this envelope, this authentication and this request body, so a new one is the
-	endpoint and the bureau name and nothing else.
+	They share this envelope, this authentication and this parsing. What they do not share is
+	the request body: CIBIL asks for one name and a gender, CRIF for a first and last name and
+	neither. So a new bureau is its endpoint, its name, and the shape of its request — and
+	nothing below that line.
 	"""
 
 	settings_doctype = SETTINGS
@@ -81,10 +85,8 @@ class SurepassBureauAdapter(BureauAdapter):
 		# caller already checked that they did. Hardcoding it would make us claim a consent
 		# nobody gave. See lending's validate_bureau_consent.
 		return {
-			"name": context.get("name"),
 			"pan": context.get("pan"),
 			"mobile": indian_mobile(context.get("mobile")),
-			"gender": (context.get("gender") or "").lower(),
 			"consent": "Y",
 		}
 
@@ -116,6 +118,50 @@ class SurepassCibilAdapter(SurepassBureauAdapter):
 	key = "Surepass CIBIL"
 	bureau = "CIBIL"
 	endpoint = "/credit-report-cibil/fetch-report-pdf"
+
+	def request_body(self, context: dict) -> dict:
+		return {
+			**super().request_body(context),
+			"name": context.get("name"),
+			"gender": (context.get("gender") or "").lower(),
+		}
+
+
+class SurepassCrifAdapter(SurepassBureauAdapter):
+	key = "Surepass CRIF"
+	bureau = "CRIF"
+	endpoint = "/credit-report-crif/fetch-report-pdf"
+
+	# Their flag for how much of the report to send back. False is what their examples use,
+	# and it answers with an empty credit_report. Whether true fills that in — and with it the
+	# applicant's existing obligations, which is the one number we still have to do without —
+	# is untested, so this stays where their documentation puts it.
+	raw_report = False
+
+	def request_body(self, context: dict) -> dict:
+		first_name, last_name = split_name(context.get("name"))
+
+		return {
+			**super().request_body(context),
+			"first_name": first_name,
+			"last_name": last_name,
+			"raw": self.raw_report,
+		}
+
+
+def split_name(full_name: str | None) -> tuple[str, str]:
+	"""A full name in the two halves CRIF ask for.
+
+	We hold one name, because that is what a lead is captured with. Everything after the first
+	word becomes the surname, which is the best a single field can do — and a mononym leaves
+	the surname empty rather than guessing at one.
+	"""
+	parts = (full_name or "").split()
+
+	if not parts:
+		return "", ""
+
+	return parts[0], " ".join(parts[1:])
 
 
 def indian_mobile(value: str | None) -> str:

@@ -13,7 +13,7 @@ HAS_LENDING = "lending" in frappe.get_installed_apps()
 if HAS_LENDING:
 	from lending.loan_integrations.base import IntegrationError
 
-	from ekyc_india.integrations.surepass import SurepassBureauAdapter, SurepassCibilAdapter
+	from ekyc_india.integrations.surepass import SurepassCibilAdapter, SurepassCrifAdapter
 
 TEST_PAN = "EKRPR1234F"
 TOKEN = "a-test-token"
@@ -37,6 +37,29 @@ SANDBOX_RESPONSE = {
 			"&X-Amz-Expires=600&X-Amz-Signature=c5168167bdab60bf30e2b27ac148585a4b474633"
 		),
 		"credit_report_base64": None,
+	},
+	"status_code": 200,
+	"success": True,
+	"message": "Success",
+	"message_code": "success",
+}
+
+
+CRIF_RESPONSE = {
+	"data": {
+		"client_id": "credit_report_crif_pdf_QuSYiwhmGFqfwuegPVqj",
+		"first_name": "Rahul",
+		"last_name": "Sharma",
+		"mobile": "9876543210",
+		"pan": "AXYPR5678L",
+		"aadhaar_number": None,
+		"credit_score": "734",
+		"credit_report": {},
+		"credit_report_link": (
+			"https://temp-surepass-bucket.s3.amazonaws.com/x/credit_report_crif/report.pdf"
+			"?X-Amz-Credential=AKIAY5K3QRM5JDBTSGYP%2F20250724%2Fap-south-1%2Fs3%2Faws4_request"
+			"&X-Amz-Expires=600&X-Amz-Signature=3ffacd2813c59d19c77789b009837b64e182136a5"
+		),
 	},
 	"status_code": 200,
 	"success": True,
@@ -117,15 +140,65 @@ class TestSurepassBureau(IntegrationTestCase):
 		self.assertEqual(self.adapter.settings.doctype, "Surepass Settings")
 		self.assertEqual(self.adapter.get_base_url(), SANDBOX_URL)
 
-	def test_another_surepass_bureau_is_an_endpoint_and_a_name(self):
-		class SurepassCrifAdapter(SurepassBureauAdapter):
-			key = "Surepass CRIF"
-			bureau = "CRIF"
-			endpoint = "/credit-report-crif/fetch-report-pdf"
 
-		crif = SurepassCrifAdapter(frappe._dict(name="Surepass CRIF"))
+@unittest.skipUnless(HAS_LENDING, "the Surepass bureau adapters need the lending app")
+class TestSurepassCrif(IntegrationTestCase):
+	def setUp(self):
+		settings = frappe.get_single("Surepass Settings")
+		settings.update(
+			{
+				"enable_production": 0,
+				"enable_sandbox": 1,
+				"sandbox_url": SANDBOX_URL,
+				"sandbox_api_secret": TOKEN,
+			}
+		)
+		settings.save(ignore_permissions=True)
 
-		# Same envelope, same token, same parsing — only the endpoint and the name changed.
-		self.assertEqual(crif.parse(SANDBOX_RESPONSE)["score"], 750)
-		self.assertEqual(crif.auth_headers(), self.adapter.auth_headers())
-		self.assertEqual(crif.bureau, "CRIF")
+		self.crif = SurepassCrifAdapter(frappe._dict(name="Surepass CRIF"))
+
+	def test_it_shares_the_envelope_and_the_token_with_cibil(self):
+		# Everything below the request body is the same, which is the whole point of the family.
+		self.assertEqual(self.crif.parse(CRIF_RESPONSE)["score"], 734)
+		self.assertEqual(self.crif.auth_headers()["Authorization"], f"Bearer {TOKEN}")
+		self.assertEqual(self.crif.bureau, "CRIF")
+
+	def test_it_asks_in_the_two_halves_crif_want(self):
+		# CIBIL takes one name and a gender. CRIF takes a first and last name and neither.
+		body = self.crif.request_body(
+			{"name": "Rahul Sharma", "pan": "AXYPR5678L", "mobile": "+91-9876543210"}
+		)
+
+		self.assertEqual(body["first_name"], "Rahul")
+		self.assertEqual(body["last_name"], "Sharma")
+		self.assertEqual(body["mobile"], "9876543210")
+		self.assertEqual(body["consent"], "Y")
+		self.assertNotIn("gender", body)
+		self.assertNotIn("name", body)
+
+	def test_a_name_of_more_than_two_words_keeps_them_all(self):
+		body = self.crif.request_body({"name": "Rahul Kumar Sharma"})
+		self.assertEqual((body["first_name"], body["last_name"]), ("Rahul", "Kumar Sharma"))
+
+		# A mononym leaves the surname empty rather than inventing one.
+		body = self.crif.request_body({"name": "Rahul"})
+		self.assertEqual((body["first_name"], body["last_name"]), ("Rahul", ""))
+
+	def test_an_empty_report_is_not_a_claim_to_know_the_obligations(self):
+		# CRIF answers with credit_report {} unless raw is asked for, so there is no figure.
+		self.assertFalse(self.crif.parse(CRIF_RESPONSE)["obligations_known"])
+
+	def test_the_aadhaar_number_is_never_stored(self):
+		# Their response carries one. A credit file is not the place to keep it, and the rules
+		# never read it.
+		response = {**CRIF_RESPONSE, "data": {**CRIF_RESPONSE["data"], "aadhaar_number": "123412341234"}}
+		parsed = self.crif.parse(response)
+
+		self.assertNotIn("aadhaar_number", parsed["payload"])
+		self.assertNotIn("123412341234", frappe.as_json(parsed["payload"]))
+
+	def test_it_keeps_the_signed_link_out_of_the_stored_payload(self):
+		parsed = self.crif.parse(CRIF_RESPONSE)
+
+		self.assertNotIn("AKIAY5K3QRM5JDBTSGYP", frappe.as_json(parsed["payload"]))
+		self.assertIn("X-Amz-Signature", parsed["report_url"])
