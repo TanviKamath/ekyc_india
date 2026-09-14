@@ -15,6 +15,7 @@ add_to_apps_screen = [
 		"logo": "/assets/ekyc_india/images/ekyc_india.svg",
 		"title": "eKYC India",
 		"route": "/app/ekyc-india",
+		"has_permission": "ekyc_india.check_app_permission",
 	}
 ]
 
@@ -265,3 +266,7 @@ workflow_methods = [
 		"method": "ekyc_india.ekyc_india.doctype.digio_settings.digio_settings.make_ekyc_request",
 	},
 ]
+
+# Lending pulls credit bureau reports through this. Lending owns the idea of a bureau and
+# knows nothing about who sells one in India, so the vendor is named here rather than there.
+lending_integration_adapters = ["ekyc_india.integrations.surepass.SurepassCibilAdapter"]
