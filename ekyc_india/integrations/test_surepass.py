@@ -13,7 +13,11 @@ HAS_LENDING = "lending" in frappe.get_installed_apps()
 if HAS_LENDING:
 	from lending.loan_integrations.base import IntegrationError
 
-	from ekyc_india.integrations.surepass import SurepassCibilAdapter, SurepassCrifAdapter
+	from ekyc_india.integrations.surepass import (
+		SurepassCibilAdapter,
+		SurepassCrifAdapter,
+		SurepassExperianAdapter,
+	)
 
 TEST_PAN = "EKRPR1234F"
 TOKEN = "a-test-token"
@@ -59,6 +63,26 @@ CRIF_RESPONSE = {
 			"https://temp-surepass-bucket.s3.amazonaws.com/x/credit_report_crif/report.pdf"
 			"?X-Amz-Credential=AKIAY5K3QRM5JDBTSGYP%2F20250724%2Fap-south-1%2Fs3%2Faws4_request"
 			"&X-Amz-Expires=600&X-Amz-Signature=3ffacd2813c59d19c77789b009837b64e182136a5"
+		),
+	},
+	"status_code": 200,
+	"success": True,
+	"message": "Success",
+	"message_code": "success",
+}
+
+
+EXPERIAN_RESPONSE = {
+	"data": {
+		"client_id": "credit_report_experian_pdf_yzWulawpzCczmLyKazqJ",
+		"name": "MAHENDRA SINGH RAJPUT",
+		"mobile": "8890812345",
+		"pan": "FPVPR1234Q",
+		"credit_score": "761",
+		"credit_report": {},
+		"credit_report_link": (
+			"https://aadhaar-kyc-docs.s3.amazonaws.com/x/credit_report_experian/report.pdf"
+			"?X-Amz-Credential=AKIAY5K3QRM5FYWPQJEB%2F20241029%2Fap-south-1%2Fs3%2Faws"
 		),
 	},
 	"status_code": 200,
@@ -202,3 +226,84 @@ class TestSurepassCrif(IntegrationTestCase):
 
 		self.assertNotIn("AKIAY5K3QRM5JDBTSGYP", frappe.as_json(parsed["payload"]))
 		self.assertIn("X-Amz-Signature", parsed["report_url"])
+
+
+@unittest.skipUnless(HAS_LENDING, "the Surepass bureau adapters need the lending app")
+class TestSurepassExperian(IntegrationTestCase):
+	def setUp(self):
+		settings = frappe.get_single("Surepass Settings")
+		settings.update(
+			{
+				"enable_production": 0,
+				"enable_sandbox": 1,
+				"sandbox_url": SANDBOX_URL,
+				"sandbox_api_secret": TOKEN,
+			}
+		)
+		settings.save(ignore_permissions=True)
+
+		self.experian = SurepassExperianAdapter(frappe._dict(name="Surepass Experian"))
+
+	def test_it_reads_the_score_out_of_the_same_envelope(self):
+		parsed = self.experian.parse(EXPERIAN_RESPONSE)
+
+		self.assertEqual(parsed["score"], 761)
+		self.assertEqual(parsed["external_id"], "credit_report_experian_pdf_yzWulawpzCczmLyKazqJ")
+		self.assertEqual(self.experian.bureau, "Experian")
+
+	def test_it_asks_by_whole_name_and_never_for_a_gender(self):
+		body = self.experian.request_body(
+			{"name": "Mahendra Singh Rajput", "pan": "FPVPR1234Q", "mobile": "8890812345", "gender": "Male"}
+		)
+
+		self.assertEqual(body["name"], "Mahendra Singh Rajput")
+		self.assertEqual(body["consent"], "Y")
+		# Offered one and still does not send it: Experian have no such field.
+		self.assertNotIn("gender", body)
+
+	def test_an_empty_report_is_not_a_claim_to_know_the_obligations(self):
+		self.assertFalse(self.experian.parse(EXPERIAN_RESPONSE)["obligations_known"])
+
+	def test_it_keeps_the_signed_link_out_of_the_stored_payload(self):
+		parsed = self.experian.parse(EXPERIAN_RESPONSE)
+
+		self.assertNotIn("AKIAY5K3QRM5FYWPQJEB", frappe.as_json(parsed["payload"]))
+		self.assertIn("X-Amz-Credential", parsed["report_url"])
+
+
+@unittest.skipUnless(HAS_LENDING, "the Surepass bureau adapters need the lending app")
+class TestEveryBureauSharesTheMachinery(IntegrationTestCase):
+	"""Three bureaux, one envelope. What differs is the request body and nothing under it."""
+
+	def setUp(self):
+		settings = frappe.get_single("Surepass Settings")
+		settings.update({"enable_sandbox": 1, "sandbox_url": SANDBOX_URL, "sandbox_api_secret": TOKEN})
+		settings.save(ignore_permissions=True)
+
+	def test_each_bureau_parses_and_authenticates_the_same_way(self):
+		cases = [
+			(SurepassCibilAdapter, "CIBIL", SANDBOX_RESPONSE, 750),
+			(SurepassCrifAdapter, "CRIF", CRIF_RESPONSE, 734),
+			(SurepassExperianAdapter, "Experian", EXPERIAN_RESPONSE, 761),
+		]
+
+		for cls, bureau, response, score in cases:
+			adapter = cls(frappe._dict(name=cls.key))
+			parsed = adapter.parse(response)
+
+			self.assertEqual(adapter.bureau, bureau)
+			self.assertEqual(parsed["score"], score)
+			self.assertEqual(adapter.auth_headers()["Authorization"], f"Bearer {TOKEN}")
+			self.assertFalse(parsed["obligations_known"])
+			self.assertNotIn("credit_report_link", parsed["payload"])
+			self.assertEqual(adapter.settings_doctype, "Surepass Settings")
+
+	def test_every_bureau_asks_for_consent_and_a_pan(self):
+		context = {"name": "Rahul Sharma", "pan": "AXYPR5678L", "mobile": "+91-9876543210"}
+
+		for cls in (SurepassCibilAdapter, SurepassCrifAdapter, SurepassExperianAdapter):
+			body = cls(frappe._dict(name=cls.key)).request_body(context)
+
+			self.assertEqual(body["consent"], "Y", cls.key)
+			self.assertEqual(body["pan"], "AXYPR5678L", cls.key)
+			self.assertEqual(body["mobile"], "9876543210", cls.key)

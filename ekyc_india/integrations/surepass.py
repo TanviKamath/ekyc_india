@@ -10,7 +10,17 @@ imported on a site without lending.
 
 Adding the next bureau Surepass carries is a class:
 
-    class SurepassCrifAdapter(SurepassBureauAdapter):
+    class SurepassExperianAdapter(SurepassBureauAdapter):
+	key = "Surepass Experian"
+	bureau = "Experian"
+	endpoint = "/credit-report-experian/fetch-report-pdf"
+
+	def request_body(self, context: dict) -> dict:
+		# CIBIL's body without the gender, which Experian do not ask for.
+		return {**super().request_body(context), "name": context.get("name")}
+
+
+class SurepassCrifAdapter(SurepassBureauAdapter):
         key = "Surepass CRIF"
         bureau = "CRIF"
         endpoint = "/credit-report-crif/fetch-report-pdf"
@@ -125,6 +135,16 @@ class SurepassCibilAdapter(SurepassBureauAdapter):
 			"name": context.get("name"),
 			"gender": (context.get("gender") or "").lower(),
 		}
+
+
+class SurepassExperianAdapter(SurepassBureauAdapter):
+	key = "Surepass Experian"
+	bureau = "Experian"
+	endpoint = "/credit-report-experian/fetch-report-pdf"
+
+	def request_body(self, context: dict) -> dict:
+		# CIBIL's body without the gender, which Experian do not ask for.
+		return {**super().request_body(context), "name": context.get("name")}
 
 
 class SurepassCrifAdapter(SurepassBureauAdapter):
