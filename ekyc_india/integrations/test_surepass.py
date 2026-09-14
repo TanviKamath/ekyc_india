@@ -16,6 +16,7 @@ if HAS_LENDING:
 	from ekyc_india.integrations.surepass import (
 		SurepassCibilAdapter,
 		SurepassCrifAdapter,
+		SurepassEquifaxAdapter,
 		SurepassExperianAdapter,
 	)
 
@@ -84,6 +85,26 @@ EXPERIAN_RESPONSE = {
 			"https://aadhaar-kyc-docs.s3.amazonaws.com/x/credit_report_experian/report.pdf"
 			"?X-Amz-Credential=AKIAY5K3QRM5FYWPQJEB%2F20241029%2Fap-south-1%2Fs3%2Faws"
 		),
+	},
+	"status_code": 200,
+	"success": True,
+	"message": "Success",
+	"message_code": "success",
+}
+
+
+# credit-report-v2, which Surepass say answers from Equifax. Note what comes back: the id is
+# masked, and its type is not the type that was sent.
+EQUIFAX_RESPONSE = {
+	"data": {
+		"client_id": "credit_report_v2_pdf_ywWaXdhazoIEjbpPuvqc",
+		"id_number": "********5514",
+		"id_type": "aadhaar",
+		"mobile": "8079012345",
+		"name": "Vishal Rathore",
+		"credit_score": "799",
+		"credit_report": {},
+		"credit_report_link": "https://aadhaar-kyc-docs.s3.amazonaws.com/x/credit_report_v2/r.pdf?sig=568a2c",
 	},
 	"status_code": 200,
 	"success": True,
@@ -285,6 +306,7 @@ class TestEveryBureauSharesTheMachinery(IntegrationTestCase):
 			(SurepassCibilAdapter, "CIBIL", SANDBOX_RESPONSE, 750),
 			(SurepassCrifAdapter, "CRIF", CRIF_RESPONSE, 734),
 			(SurepassExperianAdapter, "Experian", EXPERIAN_RESPONSE, 761),
+			(SurepassEquifaxAdapter, "Equifax", EQUIFAX_RESPONSE, 799),
 		]
 
 		for cls, bureau, response, score in cases:
@@ -298,12 +320,65 @@ class TestEveryBureauSharesTheMachinery(IntegrationTestCase):
 			self.assertNotIn("credit_report_link", parsed["payload"])
 			self.assertEqual(adapter.settings_doctype, "Surepass Settings")
 
-	def test_every_bureau_asks_for_consent_and_a_pan(self):
+	def test_every_bureau_asks_for_consent_and_a_number_to_match_on(self):
+		# Consent and the mobile are all four have in common. How a person is identified is
+		# not shared, which is why the PAN is not in the body they inherit.
 		context = {"name": "Rahul Sharma", "pan": "AXYPR5678L", "mobile": "+91-9876543210"}
 
-		for cls in (SurepassCibilAdapter, SurepassCrifAdapter, SurepassExperianAdapter):
+		for cls in (
+			SurepassCibilAdapter,
+			SurepassCrifAdapter,
+			SurepassExperianAdapter,
+			SurepassEquifaxAdapter,
+		):
 			body = cls(frappe._dict(name=cls.key)).request_body(context)
 
 			self.assertEqual(body["consent"], "Y", cls.key)
-			self.assertEqual(body["pan"], "AXYPR5678L", cls.key)
 			self.assertEqual(body["mobile"], "9876543210", cls.key)
+
+	def test_every_bureau_sends_the_pan_in_the_field_that_bureau_reads(self):
+		context = {"name": "Rahul Sharma", "pan": "AXYPR5678L", "mobile": "9876543210"}
+
+		for cls in (SurepassCibilAdapter, SurepassCrifAdapter, SurepassExperianAdapter):
+			self.assertEqual(
+				cls(frappe._dict(name=cls.key)).request_body(context)["pan"], "AXYPR5678L", cls.key
+			)
+
+		# v2 takes a typed id instead, so the same PAN goes somewhere else entirely.
+		equifax = SurepassEquifaxAdapter(frappe._dict(name="Surepass Equifax")).request_body(context)
+
+		self.assertEqual(equifax["id_number"], "AXYPR5678L")
+		self.assertEqual(equifax["id_type"], "pan")
+		self.assertNotIn("pan", equifax)
+
+
+@unittest.skipUnless(HAS_LENDING, "the Surepass bureau adapters need the lending app")
+class TestSurepassEquifax(IntegrationTestCase):
+	def setUp(self):
+		settings = frappe.get_single("Surepass Settings")
+		settings.update({"enable_sandbox": 1, "sandbox_url": SANDBOX_URL, "sandbox_api_secret": TOKEN})
+		settings.save(ignore_permissions=True)
+
+		self.equifax = SurepassEquifaxAdapter(frappe._dict(name="Surepass Equifax"))
+
+	def test_it_reads_the_score_out_of_the_same_envelope(self):
+		parsed = self.equifax.parse(EQUIFAX_RESPONSE)
+
+		self.assertEqual(parsed["score"], 799)
+		self.assertEqual(parsed["external_id"], "credit_report_v2_pdf_ywWaXdhazoIEjbpPuvqc")
+
+	def test_it_files_the_report_under_the_bureau_surepass_name(self):
+		# The endpoint is called v2 and names no bureau. Equifax is Surepass's answer, not the
+		# response's, and this is the line that would change if that answer changed.
+		self.assertEqual(self.equifax.bureau, "Equifax")
+
+	def test_the_identity_it_answers_with_is_not_the_one_it_was_asked_about(self):
+		# Sent a PAN, answered with a masked aadhaar. The report is filed against the PAN we
+		# hold rather than anything read back, so this cannot mislabel an applicant.
+		parsed = self.equifax.parse(EQUIFAX_RESPONSE)
+
+		self.assertEqual(parsed["payload"]["id_type"], "aadhaar")
+		self.assertNotIn("AXYPR5678L", frappe.as_json(parsed["payload"]))
+
+	def test_an_empty_report_is_not_a_claim_to_know_the_obligations(self):
+		self.assertFalse(self.equifax.parse(EQUIFAX_RESPONSE)["obligations_known"])

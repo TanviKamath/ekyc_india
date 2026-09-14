@@ -8,13 +8,16 @@ lending is not an Indian app. Lending owns the idea of a credit bureau; this own
 vendor. Reached only through the lending_integration_adapters hook, so nothing here is
 imported on a site without lending.
 
-Three bureaux are wired: CIBIL, Experian and CRIF. They share this token, this envelope and
-this parsing, and differ only in what they want asked. CIBIL takes a name and a gender,
-Experian a name and no gender, CRIF a first and last name and no gender at all. So a new one
-is its endpoint, its bureau name, and its request body — and nothing underneath.
+Four bureaux are wired. They share this token, this envelope and this parsing, and differ
+only in what they want asked:
 
-Surepass also sell a credit-report-v2 endpoint. It is deliberately not here: its response
-never says which bureau answered, and every Credit Bureau Report has to record one.
+    CIBIL     a name and a gender, against a pan
+    Experian  a name, no gender, against a pan
+    CRIF      a first and last name, no gender, against a pan
+    Equifax   a name and a gender, against a typed id rather than a pan
+
+So a new one is its endpoint, its bureau name, and its request body — and nothing underneath.
+All four are asked for consent and a mobile number, which is the whole of what they share.
 """
 
 import re
@@ -84,7 +87,6 @@ class SurepassBureauAdapter(BureauAdapter):
 		# caller already checked that they did. Hardcoding it would make us claim a consent
 		# nobody gave. See lending's validate_bureau_consent.
 		return {
-			"pan": context.get("pan"),
 			"mobile": indian_mobile(context.get("mobile")),
 			"consent": "Y",
 		}
@@ -121,6 +123,7 @@ class SurepassCibilAdapter(SurepassBureauAdapter):
 	def request_body(self, context: dict) -> dict:
 		return {
 			**super().request_body(context),
+			"pan": context.get("pan"),
 			"name": context.get("name"),
 			"gender": (context.get("gender") or "").lower(),
 		}
@@ -133,7 +136,7 @@ class SurepassExperianAdapter(SurepassBureauAdapter):
 
 	def request_body(self, context: dict) -> dict:
 		# CIBIL's body without the gender, which Experian do not ask for.
-		return {**super().request_body(context), "name": context.get("name")}
+		return {**super().request_body(context), "pan": context.get("pan"), "name": context.get("name")}
 
 
 class SurepassCrifAdapter(SurepassBureauAdapter):
@@ -152,9 +155,38 @@ class SurepassCrifAdapter(SurepassBureauAdapter):
 
 		return {
 			**super().request_body(context),
+			"pan": context.get("pan"),
 			"first_name": first_name,
 			"last_name": last_name,
 			"raw": self.raw_report,
+		}
+
+
+class SurepassEquifaxAdapter(SurepassBureauAdapter):
+	"""Surepass's credit-report-v2 endpoint, which they tell us answers from Equifax.
+
+	Every other bureau here is named by the path it was fetched from. This one is not: the
+	path says only "v2" and the response never names a bureau either, so the name below is
+	recorded on Surepass's word. If that word turns out to be wrong, this line is the only
+	thing that has to move — but every report already filed under it will be wrong, which is
+	why it is worth having in writing from them.
+	"""
+
+	key = "Surepass Equifax"
+	bureau = "Equifax"
+
+	# Their verb order is reversed here — fetch-pdf-report, not fetch-report-pdf.
+	endpoint = "/credit-report-v2/fetch-pdf-report"
+
+	def request_body(self, context: dict) -> dict:
+		return {
+			**super().request_body(context),
+			"name": context.get("name"),
+			"gender": (context.get("gender") or "").lower(),
+			# v2 identifies people by a typed id rather than by a PAN field of its own. A lead
+			# only ever carries a PAN, so the type is not a choice we have to make.
+			"id_number": context.get("pan"),
+			"id_type": "pan",
 		}
 
 

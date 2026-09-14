@@ -273,4 +273,5 @@ lending_integration_adapters = [
 	"ekyc_india.integrations.surepass.SurepassCibilAdapter",
 	"ekyc_india.integrations.surepass.SurepassCrifAdapter",
 	"ekyc_india.integrations.surepass.SurepassExperianAdapter",
+	"ekyc_india.integrations.surepass.SurepassEquifaxAdapter",
 ]
