@@ -9,13 +9,7 @@ from frappe.model.document import Document
 
 
 class SurepassSettings(Document):
-	"""Where to reach Surepass and what to authenticate with.
-
-	Deliberately imports nothing from lending. Surepass resells more than credit reports, so
-	this form has to stand up on a site that has ekyc_india and no lending at all. The
-	adapters that lending calls live in ekyc_india.integrations.surepass instead, which is
-	imported only when lending asks for one.
-	"""
+	"""Imports nothing from lending: this form has to stand up on a site without it."""
 
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
@@ -42,8 +36,7 @@ class SurepassSettings(Document):
 		self.validate_extra_config()
 
 	def normalise_urls(self):
-		# The adapter joins a path straight onto this, so a trailing slash would ask Surepass
-		# for a double-slashed path that they answer with a 404 rather than an explanation.
+		# The adapter joins a path straight on, and a doubled slash is a 404 from Surepass.
 		for fieldname in ("production_url", "sandbox_url"):
 			if url := self.get(fieldname):
 				self.set(fieldname, url.strip().rstrip("/"))

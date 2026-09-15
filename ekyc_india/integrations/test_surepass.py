@@ -6,8 +6,7 @@ import unittest
 import frappe
 from frappe.tests import IntegrationTestCase
 
-# The adapters sit on lending's BureauAdapter, so they only exist where lending does. eKYC
-# India is installable on its own, and its test run has to survive that.
+# The adapters subclass lending's BureauAdapter; this app installs without lending.
 HAS_LENDING = "lending" in frappe.get_installed_apps()
 
 if HAS_LENDING:
@@ -24,8 +23,6 @@ TEST_PAN = "EKRPR1234F"
 TOKEN = "a-test-token"
 SANDBOX_URL = "https://sandboxapp.surepass.app/sandbox/api/v1"
 
-# The response Surepass's sandbox actually returns, kept whole so a change in their envelope
-# fails here rather than in production.
 SANDBOX_RESPONSE = {
 	"data": {
 		"client_id": "credit_report_cibil_pdf_xfOSfdDRgierjgNdZelb",
@@ -93,8 +90,6 @@ EXPERIAN_RESPONSE = {
 }
 
 
-# credit-report-v2, which Surepass say answers from Equifax. Note what comes back: the id is
-# masked, and its type is not the type that was sent.
 EQUIFAX_RESPONSE = {
 	"data": {
 		"client_id": "credit_report_v2_pdf_ywWaXdhazoIEjbpPuvqc",
@@ -127,7 +122,6 @@ class TestSurepassBureau(IntegrationTestCase):
 		)
 		settings.save(ignore_permissions=True)
 
-		# Lending hands the adapter the routing row. Only its name is read, for messages.
 		self.adapter = SurepassCibilAdapter(frappe._dict(name="Surepass CIBIL"))
 
 	def test_it_reads_the_score_out_of_the_envelope(self):
@@ -137,8 +131,6 @@ class TestSurepassBureau(IntegrationTestCase):
 		self.assertEqual(parsed["external_id"], "credit_report_cibil_pdf_xfOSfdDRgierjgNdZelb")
 
 	def test_it_does_not_claim_to_know_the_obligations(self):
-		# The endpoint returns no obligations, and saying so is what keeps the affordability
-		# rules from reading an unfilled field as an applicant who owes nothing.
 		self.assertFalse(self.adapter.parse(SANDBOX_RESPONSE)["obligations_known"])
 
 	def test_it_keeps_the_signed_link_out_of_the_stored_payload(self):
@@ -146,7 +138,6 @@ class TestSurepassBureau(IntegrationTestCase):
 
 		self.assertNotIn("credit_report_link", parsed["payload"])
 		self.assertNotIn("AKIAY5K3QRM5KVPBYKKE", frappe.as_json(parsed["payload"]))
-		# Dropped from what we store, but still used to fetch the document during the call.
 		self.assertIn("X-Amz-Signature", parsed["report_url"])
 
 	def test_a_score_below_the_floor_is_not_a_score(self):
@@ -155,7 +146,6 @@ class TestSurepassBureau(IntegrationTestCase):
 		self.assertEqual(self.adapter.parse(response)["score"], 0)
 
 	def test_a_failure_reported_in_the_body_is_a_failure(self):
-		# Surepass answers HTTP 200 and says so in the body, so raise_for_status sees nothing.
 		response = {**SANDBOX_RESPONSE, "success": False, "message": "PAN not found"}
 
 		with self.assertRaises(IntegrationError):
@@ -170,15 +160,12 @@ class TestSurepassBureau(IntegrationTestCase):
 		self.assertEqual(body["pan"], TEST_PAN)
 
 	def test_a_number_is_sent_as_ten_bare_digits(self):
-		# A lead's Phone field keeps the country code and whatever punctuation was typed, and
-		# Surepass match on ten digits.
 		for typed in ("+91-9988776655", "+91 99887 76655", "09988776655", "9988776655"):
 			body = self.adapter.request_body({"mobile": typed})
 
 			self.assertEqual(body["mobile"], "9988776655", f"failed for {typed}")
 
 	def test_it_authenticates_with_a_bearer_token(self):
-		# Surepass issues one token and no client id, so this is not the base class's Basic auth.
 		self.assertEqual(self.adapter.auth_headers()["Authorization"], f"Bearer {TOKEN}")
 
 	def test_it_reads_its_own_settings_rather_than_the_provider_row(self):
@@ -203,13 +190,11 @@ class TestSurepassCrif(IntegrationTestCase):
 		self.crif = SurepassCrifAdapter(frappe._dict(name="Surepass CRIF"))
 
 	def test_it_shares_the_envelope_and_the_token_with_cibil(self):
-		# Everything below the request body is the same, which is the whole point of the family.
 		self.assertEqual(self.crif.parse(CRIF_RESPONSE)["score"], 734)
 		self.assertEqual(self.crif.auth_headers()["Authorization"], f"Bearer {TOKEN}")
 		self.assertEqual(self.crif.bureau, "CRIF")
 
 	def test_it_asks_in_the_two_halves_crif_want(self):
-		# CIBIL takes one name and a gender. CRIF takes a first and last name and neither.
 		body = self.crif.request_body(
 			{"name": "Rahul Sharma", "pan": "AXYPR5678L", "mobile": "+91-9876543210"}
 		)
@@ -225,17 +210,13 @@ class TestSurepassCrif(IntegrationTestCase):
 		body = self.crif.request_body({"name": "Rahul Kumar Sharma"})
 		self.assertEqual((body["first_name"], body["last_name"]), ("Rahul", "Kumar Sharma"))
 
-		# A mononym leaves the surname empty rather than inventing one.
 		body = self.crif.request_body({"name": "Rahul"})
 		self.assertEqual((body["first_name"], body["last_name"]), ("Rahul", ""))
 
 	def test_an_empty_report_is_not_a_claim_to_know_the_obligations(self):
-		# CRIF answers with credit_report {} unless raw is asked for, so there is no figure.
 		self.assertFalse(self.crif.parse(CRIF_RESPONSE)["obligations_known"])
 
 	def test_the_aadhaar_number_is_never_stored(self):
-		# Their response carries one. A credit file is not the place to keep it, and the rules
-		# never read it.
 		response = {**CRIF_RESPONSE, "data": {**CRIF_RESPONSE["data"], "aadhaar_number": "123412341234"}}
 		parsed = self.crif.parse(response)
 
@@ -279,7 +260,6 @@ class TestSurepassExperian(IntegrationTestCase):
 
 		self.assertEqual(body["name"], "Mahendra Singh Rajput")
 		self.assertEqual(body["consent"], "Y")
-		# Offered one and still does not send it: Experian have no such field.
 		self.assertNotIn("gender", body)
 
 	def test_an_empty_report_is_not_a_claim_to_know_the_obligations(self):
@@ -294,8 +274,6 @@ class TestSurepassExperian(IntegrationTestCase):
 
 @unittest.skipUnless(HAS_LENDING, "the Surepass bureau adapters need the lending app")
 class TestEveryBureauSharesTheMachinery(IntegrationTestCase):
-	"""Three bureaux, one envelope. What differs is the request body and nothing under it."""
-
 	def setUp(self):
 		settings = frappe.get_single("Surepass Settings")
 		settings.update({"enable_sandbox": 1, "sandbox_url": SANDBOX_URL, "sandbox_api_secret": TOKEN})
@@ -321,8 +299,6 @@ class TestEveryBureauSharesTheMachinery(IntegrationTestCase):
 			self.assertEqual(adapter.settings_doctype, "Surepass Settings")
 
 	def test_every_bureau_asks_for_consent_and_a_number_to_match_on(self):
-		# Consent and the mobile are all four have in common. How a person is identified is
-		# not shared, which is why the PAN is not in the body they inherit.
 		context = {"name": "Rahul Sharma", "pan": "AXYPR5678L", "mobile": "+91-9876543210"}
 
 		for cls in (
@@ -344,7 +320,6 @@ class TestEveryBureauSharesTheMachinery(IntegrationTestCase):
 				cls(frappe._dict(name=cls.key)).request_body(context)["pan"], "AXYPR5678L", cls.key
 			)
 
-		# v2 takes a typed id instead, so the same PAN goes somewhere else entirely.
 		equifax = SurepassEquifaxAdapter(frappe._dict(name="Surepass Equifax")).request_body(context)
 
 		self.assertEqual(equifax["id_number"], "AXYPR5678L")
@@ -368,13 +343,9 @@ class TestSurepassEquifax(IntegrationTestCase):
 		self.assertEqual(parsed["external_id"], "credit_report_v2_pdf_ywWaXdhazoIEjbpPuvqc")
 
 	def test_it_files_the_report_under_the_bureau_surepass_name(self):
-		# The endpoint is called v2 and names no bureau. Equifax is Surepass's answer, not the
-		# response's, and this is the line that would change if that answer changed.
 		self.assertEqual(self.equifax.bureau, "Equifax")
 
 	def test_the_identity_it_answers_with_is_not_the_one_it_was_asked_about(self):
-		# Sent a PAN, answered with a masked aadhaar. The report is filed against the PAN we
-		# hold rather than anything read back, so this cannot mislabel an applicant.
 		parsed = self.equifax.parse(EQUIFAX_RESPONSE)
 
 		self.assertEqual(parsed["payload"]["id_type"], "aadhaar")

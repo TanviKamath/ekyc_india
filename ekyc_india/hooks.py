@@ -267,8 +267,7 @@ workflow_methods = [
 	},
 ]
 
-# Lending pulls credit bureau reports through this. Lending owns the idea of a bureau and
-# knows nothing about who sells one in India, so the vendor is named here rather than there.
+# Lending owns the idea of a bureau and knows nothing about who sells one in India.
 lending_integration_adapters = [
 	"ekyc_india.integrations.surepass.SurepassCibilAdapter",
 	"ekyc_india.integrations.surepass.SurepassCrifAdapter",
