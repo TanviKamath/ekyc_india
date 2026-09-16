@@ -48,7 +48,7 @@ class SurepassSettings(Document):
 		try:
 			config = json.loads(self.extra_config)
 		except json.JSONDecodeError as e:
-			frappe.throw(_("Extra Config is not valid JSON: {0}").format(e))
+			frappe.throw(_("Extra Config is not valid JSON: {0}").format(str(e)))
 
 		if not isinstance(config, dict):
 			frappe.throw(_("Extra Config has to be a JSON object, such as {0}.").format('{"key": "value"}'))
