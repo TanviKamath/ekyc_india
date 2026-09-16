@@ -15,6 +15,7 @@ add_to_apps_screen = [
 		"logo": "/assets/ekyc_india/images/ekyc_india.svg",
 		"title": "eKYC India",
 		"route": "/app/ekyc-india",
+		"has_permission": "frappe.permissions.check_app_permission",
 	}
 ]
 
