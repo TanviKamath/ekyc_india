@@ -63,3 +63,13 @@ def after_install():
 	create_workflow_states()
 	create_workflow_transition_tasks()
 	create_integration_providers()
+
+
+def after_app_install(app_name):
+	if app_name == "lending":
+		create_integration_providers()
+
+
+def after_migrate():
+	# Sites that had ekyc_india before lending shipped the provider doctype.
+	create_integration_providers()

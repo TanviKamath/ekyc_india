@@ -6,7 +6,11 @@ import unittest
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from ekyc_india.ekyc_india.install import create_integration_providers
+from ekyc_india.ekyc_india.install import (
+	after_app_install,
+	after_migrate,
+	create_integration_providers,
+)
 
 SUREPASS_PROVIDERS = ["Surepass CIBIL", "Surepass CRIF", "Surepass Equifax", "Surepass Experian"]
 
@@ -43,3 +47,18 @@ class TestCreateIntegrationProviders(IntegrationTestCase):
 		create_integration_providers()
 
 		self.assertEqual(frappe.db.get_value("Loan Integration Provider", "Surepass CIBIL", "is_active"), 1)
+
+	def test_creates_providers_when_lending_is_installed_later(self):
+		after_app_install("some_other_app")
+		self.assertEqual(self.surepass_provider_count(), 0)
+
+		after_app_install("lending")
+		self.assertEqual(self.surepass_provider_count(), len(SUREPASS_PROVIDERS))
+
+	def test_creates_providers_on_migrate(self):
+		after_migrate()
+
+		self.assertEqual(self.surepass_provider_count(), len(SUREPASS_PROVIDERS))
+
+	def surepass_provider_count(self):
+		return frappe.db.count("Loan Integration Provider", {"name": ("in", SUREPASS_PROVIDERS)})
