@@ -38,6 +38,28 @@ def create_workflow_transition_tasks():
 			frappe.get_doc(transition).insert(ignore_permissions=True)
 
 
+def create_integration_providers():
+	# Lending owns the doctype, and this app installs without it.
+	if not frappe.db.exists("DocType", "Loan Integration Provider"):
+		return
+
+	for path in frappe.get_hooks("lending_integration_adapters", app_name="ekyc_india"):
+		adapter = frappe.get_attr(path)
+
+		# Inactive: the credentials are the site's own, and lending allows one active bureau.
+		if not frappe.db.exists("Loan Integration Provider", adapter.key):
+			frappe.get_doc(
+				{
+					"doctype": "Loan Integration Provider",
+					"provider_name": adapter.key,
+					"provider_type": adapter.provider_type,
+					"adapter": adapter.key,
+					"is_active": 0,
+				}
+			).insert(ignore_permissions=True)
+
+
 def after_install():
 	create_workflow_states()
 	create_workflow_transition_tasks()
+	create_integration_providers()
