@@ -97,7 +97,6 @@ add_to_apps_screen = [
 
 # before_install = "ekyc_india.install.before_install"
 after_install = "ekyc_india.ekyc_india.install.after_install"
-after_migrate = "ekyc_india.ekyc_india.install.after_migrate"
 
 # Uninstallation
 # ------------
@@ -111,7 +110,7 @@ after_migrate = "ekyc_india.ekyc_india.install.after_migrate"
 # Name of the app being installed is passed as an argument
 
 # before_app_install = "ekyc_india.utils.before_app_install"
-after_app_install = "ekyc_india.ekyc_india.install.after_app_install"
+# after_app_install = "ekyc_india.utils.after_app_install"
 
 # Integration Cleanup
 # -------------------
