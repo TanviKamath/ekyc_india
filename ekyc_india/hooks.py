@@ -96,7 +96,7 @@ add_to_apps_screen = [
 # ------------
 
 # before_install = "ekyc_india.install.before_install"
-after_install = "ekyc_india.ekyc_india.install.after_install"
+# after_install = "ekyc_india.install.after_install"
 
 # Uninstallation
 # ------------
