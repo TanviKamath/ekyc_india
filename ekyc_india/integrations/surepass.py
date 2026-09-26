@@ -59,7 +59,7 @@ class SurepassBureauAdapter(BureauAdapter):
 		if not response.get("success") or cint(response.get("status_code")) != SUCCESS_CODE:
 			raise IntegrationError(
 				_("{0} refused the request: {1}").format(
-					self.provider.name, response.get("message") or _("no reason given")
+					self.key, response.get("message") or _("no reason given")
 				)
 			)
 

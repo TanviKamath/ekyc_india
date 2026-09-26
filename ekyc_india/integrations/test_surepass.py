@@ -109,7 +109,7 @@ EQUIFAX_RESPONSE = {
 
 
 @unittest.skipUnless(HAS_LENDING, "the Surepass bureau adapters need the lending app")
-class TestSurepassBureau(IntegrationTestCase):
+class TestSurepassCibil(IntegrationTestCase):
 	def setUp(self):
 		settings = frappe.get_single("Surepass Settings")
 		settings.update(
@@ -122,7 +122,7 @@ class TestSurepassBureau(IntegrationTestCase):
 		)
 		settings.save(ignore_permissions=True)
 
-		self.adapter = SurepassCibilAdapter(frappe._dict(name="Surepass CIBIL"))
+		self.adapter = SurepassCibilAdapter()
 
 	def test_it_reads_the_score_out_of_the_envelope(self):
 		parsed = self.adapter.parse(SANDBOX_RESPONSE)
@@ -168,7 +168,7 @@ class TestSurepassBureau(IntegrationTestCase):
 	def test_it_authenticates_with_a_bearer_token(self):
 		self.assertEqual(self.adapter.auth_headers()["Authorization"], f"Bearer {TOKEN}")
 
-	def test_it_reads_its_own_settings_rather_than_the_provider_row(self):
+	def test_it_reads_its_own_settings(self):
 		self.assertEqual(self.adapter.settings.doctype, "Surepass Settings")
 		self.assertEqual(self.adapter.get_base_url(), SANDBOX_URL)
 
@@ -187,7 +187,7 @@ class TestSurepassCrif(IntegrationTestCase):
 		)
 		settings.save(ignore_permissions=True)
 
-		self.crif = SurepassCrifAdapter(frappe._dict(name="Surepass CRIF"))
+		self.crif = SurepassCrifAdapter()
 
 	def test_it_shares_the_envelope_and_the_token_with_cibil(self):
 		self.assertEqual(self.crif.parse(CRIF_RESPONSE)["score"], 734)
@@ -244,7 +244,7 @@ class TestSurepassExperian(IntegrationTestCase):
 		)
 		settings.save(ignore_permissions=True)
 
-		self.experian = SurepassExperianAdapter(frappe._dict(name="Surepass Experian"))
+		self.experian = SurepassExperianAdapter()
 
 	def test_it_reads_the_score_out_of_the_same_envelope(self):
 		parsed = self.experian.parse(EXPERIAN_RESPONSE)
@@ -288,7 +288,7 @@ class TestEveryBureauSharesTheMachinery(IntegrationTestCase):
 		]
 
 		for cls, bureau, response, score in cases:
-			adapter = cls(frappe._dict(name=cls.key))
+			adapter = cls()
 			parsed = adapter.parse(response)
 
 			self.assertEqual(adapter.bureau, bureau)
@@ -307,7 +307,7 @@ class TestEveryBureauSharesTheMachinery(IntegrationTestCase):
 			SurepassExperianAdapter,
 			SurepassEquifaxAdapter,
 		):
-			body = cls(frappe._dict(name=cls.key)).request_body(context)
+			body = cls().request_body(context)
 
 			self.assertEqual(body["consent"], "Y", cls.key)
 			self.assertEqual(body["mobile"], "9876543210", cls.key)
@@ -316,11 +316,9 @@ class TestEveryBureauSharesTheMachinery(IntegrationTestCase):
 		context = {"name": "Rahul Sharma", "pan": "AXYPR5678L", "mobile": "9876543210"}
 
 		for cls in (SurepassCibilAdapter, SurepassCrifAdapter, SurepassExperianAdapter):
-			self.assertEqual(
-				cls(frappe._dict(name=cls.key)).request_body(context)["pan"], "AXYPR5678L", cls.key
-			)
+			self.assertEqual(cls().request_body(context)["pan"], "AXYPR5678L", cls.key)
 
-		equifax = SurepassEquifaxAdapter(frappe._dict(name="Surepass Equifax")).request_body(context)
+		equifax = SurepassEquifaxAdapter().request_body(context)
 
 		self.assertEqual(equifax["id_number"], "AXYPR5678L")
 		self.assertEqual(equifax["id_type"], "pan")
@@ -334,7 +332,7 @@ class TestSurepassEquifax(IntegrationTestCase):
 		settings.update({"enable_sandbox": 1, "sandbox_url": SANDBOX_URL, "sandbox_api_secret": TOKEN})
 		settings.save(ignore_permissions=True)
 
-		self.equifax = SurepassEquifaxAdapter(frappe._dict(name="Surepass Equifax"))
+		self.equifax = SurepassEquifaxAdapter()
 
 	def test_it_reads_the_score_out_of_the_same_envelope(self):
 		parsed = self.equifax.parse(EQUIFAX_RESPONSE)
